@@ -8,6 +8,7 @@ const CATEGORIES=['사용자 매뉴얼','자산관리','품질매뉴얼','문서
 const WORK_GROUPS=['F/E','Mobile','B/E','DB','Infra','DevOps','Security','QA','RA','PMO','Product','UX/UI','Clinical','Data','External Lab','Meditrix','BlueMit','Executive','Common'];
 const DOC_STATUSES=['미착수','작성중','부분완료','초안완료','검토중','수정필요','승인대기','승인완료','외부진행중','보류','지연','완료'];
 const PRIORITIES=['Critical','High','Medium','Low'];
+const DOC_TYPES=['신청문서','심사문서'];
 const ISSUE_STATUSES=['Open','In Progress','Waiting','Decision Needed','Resolved','Closed'];
 const COOP_STATUSES=['요청','확인중','답변완료','반려','보류','완료'];
 const ACTION_STATUSES=['Open','In Progress','Done','Overdue','Cancelled'];
@@ -342,17 +343,56 @@ function Dashboard({docs,issues,risks,actions,milestones}){
 /* ══════════════════════════════════════════════════
    DOCUMENT LIST
    ══════════════════════════════════════════════════ */
+function SortTh({label,sortKey,sort,onSort,style}){
+  const active=sort.key===sortKey;
+  const icon=active?(sort.dir==='asc'?'▲':'▼'):'⇅';
+  return<th style={{cursor:'pointer',userSelect:'none',whiteSpace:'nowrap',...style}}onClick={()=>onSort(sortKey)}>
+    <span style={{display:'inline-flex',alignItems:'center',gap:4}}>
+      {label}<span style={{fontSize:'9px',opacity:active?1:0.35,color:active?'var(--acc2)':'inherit'}}>{icon}</span>
+    </span>
+  </th>;
+}
+
 function DocList({docs,onSelect}){
-  const[filter,setF]=useState({cat:'',status:'',wg:'',priority:'',q:''});
+  const[filter,setF]=useState({cat:'',status:'',wg:'',priority:'',docType:'',q:''});
+  const[sort,setSort]=useState({key:'id',dir:'asc'});
+
+  const toggleSort=(key)=>setSort(prev=>prev.key===key?{key,dir:prev.dir==='asc'?'desc':'asc'}:{key,dir:'asc'});
+
+  const PRIORITY_ORDER={'Critical':0,'High':1,'Medium':2,'Low':3};
+  const STATUS_ORDER={};
+  DOC_STATUSES.forEach((s,i)=>{STATUS_ORDER[s]=i;});
+
   const filtered=useMemo(()=>{
     let r=docs;
     if(filter.cat)r=r.filter(d=>d.category===filter.cat);
     if(filter.status)r=r.filter(d=>d.status===filter.status);
     if(filter.priority)r=r.filter(d=>d.priority===filter.priority);
     if(filter.wg)r=r.filter(d=>(d.work_groups||[]).includes(filter.wg));
+    if(filter.docType)r=r.filter(d=>d.doc_type===filter.docType);
     if(filter.q){const q=filter.q.toLowerCase();r=r.filter(d=>d.doc_name.toLowerCase().includes(q)||d.id.toLowerCase().includes(q)||(d.notes||'').toLowerCase().includes(q));}
+
+    // 정렬
+    const{key,dir}=sort;
+    const mul=dir==='asc'?1:-1;
+    r=[...r].sort((a,b)=>{
+      if(key==='id')return mul*(idNum(a.id)-idNum(b.id));
+      if(key==='doc_name')return mul*(a.doc_name||'').localeCompare(b.doc_name||'','ko');
+      if(key==='doc_type')return mul*((a.doc_type||'').localeCompare(b.doc_type||'','ko'));
+      if(key==='category')return mul*(a.category||'').localeCompare(b.category||'','ko');
+      if(key==='status')return mul*((STATUS_ORDER[a.status]??99)-(STATUS_ORDER[b.status]??99));
+      if(key==='progress')return mul*(a.progress-b.progress);
+      if(key==='owner')return mul*((a.primary_owner||a.owner_org||'').localeCompare(b.primary_owner||b.owner_org||'','ko'));
+      if(key==='priority')return mul*((PRIORITY_ORDER[a.priority]??99)-(PRIORITY_ORDER[b.priority]??99));
+      if(key==='file_count')return mul*((a.file_count||0)-(b.file_count||0));
+      if(key==='due_date'){const da=a.due_date?new Date(a.due_date):new Date('9999-12-31');const db=b.due_date?new Date(b.due_date):new Date('9999-12-31');return mul*(da-db);}
+      if(key==='notes')return mul*((a.remaining_tasks||a.notes||'').localeCompare(b.remaining_tasks||b.notes||'','ko'));
+      return 0;
+    });
     return r;
-  },[docs,filter]);
+  },[docs,filter,sort]);
+
+  const sp=(k)=>({sortKey:k,sort,onSort:toggleSort});
 
   return<div>
     <div className="section-title">📄 문서 관리 <span style={{fontSize:'11px',color:'var(--g4)',fontWeight:400}}>({filtered.length}/{docs.length}건)</span></div>
@@ -362,18 +402,30 @@ function DocList({docs,onSelect}){
       <select value={filter.status}onChange={e=>setF(p=>({...p,status:e.target.value}))}><option value="">전체 상태</option>{DOC_STATUSES.map(s=><option key={s}>{s}</option>)}</select>
       <select value={filter.priority}onChange={e=>setF(p=>({...p,priority:e.target.value}))}><option value="">전체 우선순위</option>{PRIORITIES.map(p=><option key={p}>{p}</option>)}</select>
       <select value={filter.wg}onChange={e=>setF(p=>({...p,wg:e.target.value}))}><option value="">전체 업무군</option>{WORK_GROUPS.map(w=><option key={w}>{w}</option>)}</select>
-      <button className="btn btn-ghost btn-sm"onClick={()=>setF({cat:'',status:'',wg:'',priority:'',q:''})}>초기화</button>
+      <select value={filter.docType}onChange={e=>setF(p=>({...p,docType:e.target.value}))}><option value="">전체 문서구분</option>{DOC_TYPES.map(t=><option key={t}>{t}</option>)}</select>
+      <button className="btn btn-ghost btn-sm"onClick={()=>setF({cat:'',status:'',wg:'',priority:'',docType:'',q:''})}>초기화</button>
     </div>
     <div className="tbl-wrap">
       <table className="tbl">
         <thead><tr>
-          <th>ID</th><th>문서명</th><th>카테고리</th><th>상태</th><th>진행률</th>
-          <th>담당</th><th>업무군</th><th>우선순위</th><th>📎</th><th>마감일</th><th>비고</th>
+          <SortTh label="ID"{...sp('id')}/>
+          <SortTh label="문서 구분"{...sp('doc_type')}/>
+          <SortTh label="문서명"{...sp('doc_name')}/>
+          <SortTh label="카테고리"{...sp('category')}/>
+          <SortTh label="상태"{...sp('status')}/>
+          <SortTh label="진행률"{...sp('progress')}/>
+          <SortTh label="담당"{...sp('owner')}/>
+          <th>업무군</th>
+          <SortTh label="우선순위"{...sp('priority')}/>
+          <SortTh label="📎"{...sp('file_count')}style={{textAlign:'center'}}/>
+          <SortTh label="마감일"{...sp('due_date')}/>
+          <SortTh label="비고"{...sp('notes')}/>
         </tr></thead>
         <tbody>
-          {filtered.length===0&&<tr><td colSpan={11}className="empty">조건에 맞는 문서가 없습니다</td></tr>}
+          {filtered.length===0&&<tr><td colSpan={12}className="empty">조건에 맞는 문서가 없습니다</td></tr>}
           {filtered.map(d=><tr key={d.id}onClick={()=>onSelect(d)}>
             <td style={{fontFamily:'IBM Plex Mono',fontSize:'11px',color:'var(--g4)'}}>{d.id}</td>
+            <td style={{fontSize:'11px'}}>{d.doc_type?<span style={{padding:'2px 7px',borderRadius:3,fontSize:'10px',fontWeight:700,background:d.doc_type==='신청문서'?'rgba(59,139,255,0.15)':'rgba(124,58,237,0.15)',color:d.doc_type==='신청문서'?'var(--acc2)':'var(--pur)',border:`1px solid ${d.doc_type==='신청문서'?'rgba(59,139,255,0.3)':'rgba(124,58,237,0.3)'}`}}>{d.doc_type}</span>:<span style={{color:'var(--g6)',fontSize:'10px'}}>—</span>}</td>
             <td style={{fontWeight:600,maxWidth:220}}>{d.doc_name}</td>
             <td style={{fontSize:'11px'}}>{d.category}</td>
             <td><Badge text={d.status}/></td>
@@ -513,6 +565,15 @@ function DocDetail({doc,onClose,onUpdate,connected}){
       <div className="form-row">
         <div className="form-group"><label>문서명</label><input value={form.doc_name}onChange={e=>setForm(p=>({...p,doc_name:e.target.value}))}/></div>
         <div className="form-group"><label>카테고리</label><select value={form.category}onChange={e=>setForm(p=>({...p,category:e.target.value}))}>{CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></div>
+      </div>
+      <div className="form-row">
+        <div className="form-group" style={{maxWidth:200}}>
+          <label>문서 구분</label>
+          <select value={form.doc_type||''}onChange={e=>setForm(p=>({...p,doc_type:e.target.value}))}>
+            <option value="">— 선택 —</option>
+            {DOC_TYPES.map(t=><option key={t}>{t}</option>)}
+          </select>
+        </div>
       </div>
       <div className="form-row">
         <div className="form-group"><label>담당 조직</label><input value={form.owner_org||''}onChange={e=>setForm(p=>({...p,owner_org:e.target.value}))}/></div>
