@@ -8,7 +8,7 @@ const CATEGORIES=['사용자 매뉴얼','자산관리','품질매뉴얼','문서
 const WORK_GROUPS=['F/E','Mobile','B/E','DB','Infra','DevOps','Security','QA','RA','PMO','Product','UX/UI','Clinical','Data','External Lab','Meditrix','BlueMit','Executive','Common'];
 const DOC_STATUSES=['미착수','작성중','부분완료','초안완료','검토중','수정필요','승인대기','승인완료','외부진행중','보류','지연','완료'];
 const PRIORITIES=['Critical','High','Medium','Low'];
-const DOC_TYPES=['신청문서','심사문서'];
+const DOC_TYPES=['신청문서','심사문서','기타문서'];
 const ISSUE_STATUSES=['Open','In Progress','Waiting','Decision Needed','Resolved','Closed'];
 const COOP_STATUSES=['요청','확인중','답변완료','반려','보류','완료'];
 const ACTION_STATUSES=['Open','In Progress','Done','Overdue','Cancelled'];
@@ -23,8 +23,8 @@ const priorityIcon=(p)=>({Critical:'🔴',High:'🟠',Medium:'🟡',Low:'⚪'}[p
 /* ── ID 유틸리티 함수 ── */
 // ID에서 숫자 부분 추출 (DOC-01→1, ISSUE-003→3, R-01→1, A-12→12, M-01→1)
 const idNum=(id)=>{const m=(id||'').match(/(\d+)$/);return m?parseInt(m[1],10):0;};
-// ID 기준 오름차순 정렬
-const sortById=(arr)=>[...arr].sort((a,b)=>idNum(a.id)-idNum(b.id));
+// ID 기준 오름차순 정렬 (전체 ID 알파벳 순 — 수정해도 순서 고정)
+const sortById=(arr)=>[...arr].sort((a,b)=>(a.id||'').localeCompare(b.id||'','en',{numeric:true}));
 // 다음 ID 생성 (기존 최대값 + 1)
 const nextId=(items,prefix,pad)=>{const max=items.reduce((mx,i)=>Math.max(mx,idNum(i.id)),0);return`${prefix}${String(max+1).padStart(pad,'0')}`;};
 // 삭제 후 ID 재번호 부여
@@ -353,7 +353,15 @@ function SortTh({label,sortKey,sort,onSort,style}){
   </th>;
 }
 
-function DocList({docs,onSelect}){
+/* 문서 구분 뱃지 색상 */
+const docTypeStyle=(t)=>{
+  if(t==='신청문서')return{bg:'rgba(59,139,255,0.15)',color:'var(--acc2)',border:'1px solid rgba(59,139,255,0.3)'};
+  if(t==='심사문서')return{bg:'rgba(124,58,237,0.15)',color:'var(--pur)',border:'1px solid rgba(124,58,237,0.3)'};
+  if(t==='기타문서')return{bg:'rgba(0,194,212,0.15)',color:'var(--cyan)',border:'1px solid rgba(0,194,212,0.3)'};
+  return{bg:'transparent',color:'var(--g6)',border:'none'};
+};
+
+function DocList({docs,onSelect,onAdd}){
   const[filter,setF]=useState({cat:'',status:'',wg:'',priority:'',docType:'',q:''});
   const[sort,setSort]=useState({key:'id',dir:'asc'});
 
@@ -376,7 +384,8 @@ function DocList({docs,onSelect}){
     const{key,dir}=sort;
     const mul=dir==='asc'?1:-1;
     r=[...r].sort((a,b)=>{
-      if(key==='id')return mul*(idNum(a.id)-idNum(b.id));
+      if(key==='no')return mul*(a.id||'').localeCompare(b.id||'','en',{numeric:true});
+      if(key==='id')return mul*(a.id||'').localeCompare(b.id||'','en',{numeric:true});
       if(key==='doc_name')return mul*(a.doc_name||'').localeCompare(b.doc_name||'','ko');
       if(key==='doc_type')return mul*((a.doc_type||'').localeCompare(b.doc_type||'','ko'));
       if(key==='category')return mul*(a.category||'').localeCompare(b.category||'','ko');
@@ -395,7 +404,10 @@ function DocList({docs,onSelect}){
   const sp=(k)=>({sortKey:k,sort,onSort:toggleSort});
 
   return<div>
-    <div className="section-title">📄 문서 관리 <span style={{fontSize:'11px',color:'var(--g4)',fontWeight:400}}>({filtered.length}/{docs.length}건)</span></div>
+    <div className="section-title" style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+      <span>📄 문서 관리 <span style={{fontSize:'11px',color:'var(--g4)',fontWeight:400}}>({filtered.length}/{docs.length}건)</span></span>
+      <button className="btn btn-primary btn-sm" onClick={onAdd}>+ 신규 문서 추가</button>
+    </div>
     <div className="filters">
       <input placeholder="🔍 문서명 / ID 검색"value={filter.q}onChange={e=>setF(p=>({...p,q:e.target.value}))}/>
       <select value={filter.cat}onChange={e=>setF(p=>({...p,cat:e.target.value}))}><option value="">전체 카테고리</option>{CATEGORIES.map(c=><option key={c}>{c}</option>)}</select>
@@ -408,6 +420,7 @@ function DocList({docs,onSelect}){
     <div className="tbl-wrap">
       <table className="tbl">
         <thead><tr>
+          <SortTh label="No"{...sp('no')}style={{width:40,textAlign:'center'}}/>
           <SortTh label="ID"{...sp('id')}/>
           <SortTh label="문서 구분"{...sp('doc_type')}/>
           <SortTh label="문서명"{...sp('doc_name')}/>
@@ -422,21 +435,25 @@ function DocList({docs,onSelect}){
           <SortTh label="비고"{...sp('notes')}/>
         </tr></thead>
         <tbody>
-          {filtered.length===0&&<tr><td colSpan={12}className="empty">조건에 맞는 문서가 없습니다</td></tr>}
-          {filtered.map(d=><tr key={d.id}onClick={()=>onSelect(d)}>
-            <td style={{fontFamily:'IBM Plex Mono',fontSize:'11px',color:'var(--g4)'}}>{d.id}</td>
-            <td style={{fontSize:'11px'}}>{d.doc_type?<span style={{padding:'2px 7px',borderRadius:3,fontSize:'10px',fontWeight:700,background:d.doc_type==='신청문서'?'rgba(59,139,255,0.15)':'rgba(124,58,237,0.15)',color:d.doc_type==='신청문서'?'var(--acc2)':'var(--pur)',border:`1px solid ${d.doc_type==='신청문서'?'rgba(59,139,255,0.3)':'rgba(124,58,237,0.3)'}`}}>{d.doc_type}</span>:<span style={{color:'var(--g6)',fontSize:'10px'}}>—</span>}</td>
-            <td style={{fontWeight:600,maxWidth:220}}>{d.doc_name}</td>
-            <td style={{fontSize:'11px'}}>{d.category}</td>
-            <td><Badge text={d.status}/></td>
-            <td style={{width:80}}><div style={{display:'flex',alignItems:'center',gap:6}}><ProgressBar value={d.progress}/><span style={{fontSize:'10px',fontWeight:600,minWidth:28}}>{d.progress}%</span></div></td>
-            <td style={{fontSize:'11px'}}>{d.primary_owner||d.owner_org}</td>
-            <td><div className="wg-chips">{(d.work_groups||[]).slice(0,3).map(w=><span key={w}className="wg-chip">{w}</span>)}{(d.work_groups||[]).length>3&&<span className="wg-chip">+{(d.work_groups||[]).length-3}</span>}</div></td>
-            <td>{priorityIcon(d.priority)} <span style={{fontSize:'11px'}}>{d.priority}</span></td>
-            <td style={{textAlign:'center'}}>{(d.file_count||0)>0?<span className="file-badge file-latest">📎 {d.file_count}</span>:<span style={{color:'var(--g6)',fontSize:'10px'}}>—</span>}</td>
-            <td><DueTag date={d.due_date}/></td>
-            <td style={{fontSize:'11px',color:'var(--g4)',maxWidth:150,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.remaining_tasks||d.notes}</td>
-          </tr>)}
+          {filtered.length===0&&<tr><td colSpan={13}className="empty">조건에 맞는 문서가 없습니다</td></tr>}
+          {filtered.map((d,idx)=>{
+            const ds=docTypeStyle(d.doc_type);
+            return<tr key={d.id}onClick={()=>onSelect(d)}>
+              <td style={{textAlign:'center',fontSize:'11px',color:'var(--g6)',fontFamily:'IBM Plex Mono'}}>{idx+1}</td>
+              <td style={{fontFamily:'IBM Plex Mono',fontSize:'11px',color:'var(--g4)'}}>{d.id}</td>
+              <td style={{fontSize:'11px'}}>{d.doc_type?<span style={{padding:'2px 7px',borderRadius:3,fontSize:'10px',fontWeight:700,background:ds.bg,color:ds.color,border:ds.border}}>{d.doc_type}</span>:<span style={{color:'var(--g6)',fontSize:'10px'}}>—</span>}</td>
+              <td style={{fontWeight:600,maxWidth:220}}>{d.doc_name}</td>
+              <td style={{fontSize:'11px'}}>{d.category}</td>
+              <td><Badge text={d.status}/></td>
+              <td style={{width:80}}><div style={{display:'flex',alignItems:'center',gap:6}}><ProgressBar value={d.progress}/><span style={{fontSize:'10px',fontWeight:600,minWidth:28}}>{d.progress}%</span></div></td>
+              <td style={{fontSize:'11px'}}>{d.primary_owner||d.owner_org}</td>
+              <td><div className="wg-chips">{(d.work_groups||[]).slice(0,3).map(w=><span key={w}className="wg-chip">{w}</span>)}{(d.work_groups||[]).length>3&&<span className="wg-chip">+{(d.work_groups||[]).length-3}</span>}</div></td>
+              <td>{priorityIcon(d.priority)} <span style={{fontSize:'11px'}}>{d.priority}</span></td>
+              <td style={{textAlign:'center'}}>{(d.file_count||0)>0?<span className="file-badge file-latest">📎 {d.file_count}</span>:<span style={{color:'var(--g6)',fontSize:'10px'}}>—</span>}</td>
+              <td><DueTag date={d.due_date}/></td>
+              <td style={{fontSize:'11px',color:'var(--g4)',maxWidth:150,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{d.remaining_tasks||d.notes}</td>
+            </tr>;
+          })}
         </tbody>
       </table>
     </div>
@@ -446,9 +463,17 @@ function DocList({docs,onSelect}){
 /* ══════════════════════════════════════════════════
    DOCUMENT DETAIL MODAL
    ══════════════════════════════════════════════════ */
-function DocDetail({doc,onClose,onUpdate,connected}){
+function DocDetail({doc,onClose,onUpdate,onAdd,connected}){
+  const isNew=doc?.__isNew===true;
   const[tab,setTab]=useState('info');
-  const[form,setForm]=useState({...doc});
+  const[form,setForm]=useState(isNew?{
+    id:'',doc_name:'',category:CATEGORIES[0],doc_type:'',
+    owner_org:'',primary_owner:'',owner_group:'',
+    reviewer:'',approver:'',due_date:'',priority:'Medium',
+    related_standard:'',preconditions:'',dependency_docs:'',
+    status:'미착수',progress:0,definition_of_done:'',
+    notes:'',remaining_tasks:'',work_groups:[],file_count:0
+  }:{...doc});
   const[files,setFiles]=useState([]);
   const[uploading,setUploading]=useState(false);
   const[uploadPct,setUploadPct]=useState(0);
@@ -456,16 +481,18 @@ function DocDetail({doc,onClose,onUpdate,connected}){
   const[fileDesc,setFileDesc]=useState('');
   const[fileVer,setFileVer]=useState('v1.0');
   const fileRef=useRef(null);
-  const tabs=[{k:'info',l:'기본정보'},{k:'status',l:'작성현황'},{k:'files',l:`📎 파일첨부 (${files.length})`},{k:'wg',l:'업무군'},{k:'issues',l:'이슈/잔여과업'},{k:'notes',l:'메모/비고'}];
+  const tabs=isNew
+    ?[{k:'info',l:'기본정보'},{k:'status',l:'작성현황'},{k:'wg',l:'업무군'}]
+    :[{k:'info',l:'기본정보'},{k:'status',l:'작성현황'},{k:'files',l:`📎 파일첨부 (${files.length})`},{k:'wg',l:'업무군'},{k:'issues',l:'이슈/잔여과업'},{k:'notes',l:'메모/비고'}];
 
   // 파일 목록 로드
   useEffect(()=>{
-    if(!supabase||!connected)return;
+    if(!supabase||!connected||isNew)return;
     (async()=>{
       const{data}=await supabase.from('file_attachments').select('*').eq('document_id',doc.id).order('created_at',{ascending:false});
       if(data)setFiles(data);
     })();
-  },[doc.id,connected]);
+  },[doc.id,connected,isNew]);
 
   const getFileIcon=(name)=>{
     const ext=(name||'').split('.').pop().toLowerCase();
@@ -548,22 +575,34 @@ function DocDetail({doc,onClose,onUpdate,connected}){
   const handleDragOver=(e)=>{e.preventDefault();setDrag(true);};
   const handleDragLeave=()=>setDrag(false);
 
-  const save=()=>{onUpdate({...form,file_count:files.length});onClose();};
+  const save=()=>{
+    if(isNew){
+      if(!form.id.trim()){alert('ID를 입력해주세요.');return;}
+      if(!form.doc_name.trim()){alert('문서명을 입력해주세요.');return;}
+      onAdd({...form,id:form.id.trim(),doc_name:form.doc_name.trim()});
+    }else{
+      onUpdate({...form,file_count:files.length});
+    }
+    onClose();
+  };
 
   return<div className="modal-overlay"onClick={onClose}><div className="modal"onClick={e=>e.stopPropagation()}>
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:16}}>
       <div>
-        <div style={{fontSize:'11px',color:'var(--g4)',fontFamily:'IBM Plex Mono'}}>{form.id}</div>
-        <h2 style={{margin:0}}>{form.doc_name}</h2>
-        <div style={{display:'flex',gap:8,marginTop:6}}><Badge text={form.status}/><Badge text={form.priority}/>{files.length>0&&<span className="file-badge file-latest">📎 {files.length}건</span>}</div>
+        <div style={{fontSize:'11px',color:'var(--g4)',fontFamily:'IBM Plex Mono'}}>{isNew?'신규 문서':form.id}</div>
+        <h2 style={{margin:0}}>{isNew?'신규 문서 추가':form.doc_name}</h2>
+        <div style={{display:'flex',gap:8,marginTop:6}}><Badge text={form.status}/><Badge text={form.priority}/>{!isNew&&files.length>0&&<span className="file-badge file-latest">📎 {files.length}건</span>}</div>
       </div>
       <button onClick={onClose}style={{background:'none',border:'none',color:'var(--g4)',fontSize:'20px',cursor:'pointer'}}>✕</button>
     </div>
     <div className="tabs">{tabs.map(t=><div key={t.k}className={`tab ${tab===t.k?'active':''}`}onClick={()=>setTab(t.k)}>{t.l}</div>)}</div>
 
     {tab==='info'&&<div>
+      {isNew&&<div className="form-row">
+        <div className="form-group"><label>ID <span style={{color:'var(--red)'}}>*</span></label><input value={form.id}onChange={e=>setForm(p=>({...p,id:e.target.value}))}placeholder="예: DOC-DM-003"/></div>
+      </div>}
       <div className="form-row">
-        <div className="form-group"><label>문서명</label><input value={form.doc_name}onChange={e=>setForm(p=>({...p,doc_name:e.target.value}))}/></div>
+        <div className="form-group"><label>문서명 {isNew&&<span style={{color:'var(--red)'}}>*</span>}</label><input value={form.doc_name}onChange={e=>setForm(p=>({...p,doc_name:e.target.value}))}/></div>
         <div className="form-group"><label>카테고리</label><select value={form.category}onChange={e=>setForm(p=>({...p,category:e.target.value}))}>{CATEGORIES.map(c=><option key={c}>{c}</option>)}</select></div>
       </div>
       <div className="form-row">
@@ -670,7 +709,7 @@ function DocDetail({doc,onClose,onUpdate,connected}){
 
     <div style={{display:'flex',justifyContent:'flex-end',gap:8,marginTop:20,paddingTop:16,borderTop:'1px solid var(--brd)'}}>
       <button className="btn btn-ghost"onClick={onClose}>취소</button>
-      <button className="btn btn-primary"onClick={save}>💾 저장</button>
+      <button className="btn btn-primary"onClick={save}>{isNew?'➕ 신규 등록':'💾 저장'}</button>
     </div>
   </div></div>;
 }
@@ -973,9 +1012,9 @@ export default function App(){
   const[selectedDoc,setSelectedDoc]=useState(null);
   const[connected,setConnected]=useState(false);
 
-  // selectedDoc이 열려있을 때 docs가 업데이트되면 최신 데이터 반영
+  // selectedDoc이 열려있을 때 docs가 업데이트되면 최신 데이터 반영 (신규 모달 제외)
   useEffect(()=>{
-    if(selectedDoc){const updated=docs.find(d=>d.id===selectedDoc.id);if(updated&&updated!==selectedDoc)setSelectedDoc(updated);}
+    if(selectedDoc&&!selectedDoc.__isNew){const updated=docs.find(d=>d.id===selectedDoc.id);if(updated&&updated!==selectedDoc)setSelectedDoc(updated);}
   },[docs]);
 
   // Supabase 연결 시도
@@ -1040,12 +1079,26 @@ export default function App(){
   const loadCoops=async()=>{if(!supabase)return;const{data}=await supabase.from('cooperation_requests').select('*');if(data)setCoops(data);};
 
   const updateDoc=async(d)=>{
+    // 요청7: sortById로 정렬하되 ID 자체는 변경하지 않음 (알파벳 순 고정)
     setDocs(prev=>sortById(prev.map(x=>x.id===d.id?d:x)));
     if(supabase&&connected){
       const{work_groups,...docData}=d;
       await supabase.from('documents').upsert(docData);
       if(work_groups){
         await supabase.from('document_work_groups').delete().eq('document_id',d.id);
+        for(const w of work_groups)await supabase.from('document_work_groups').insert({document_id:d.id,work_group:w});
+      }
+    }
+  };
+
+  const addDoc=async(d)=>{
+    if(docs.some(x=>x.id===d.id)){alert(`ID "${d.id}" 가 이미 존재합니다. 다른 ID를 입력해주세요.`);return;}
+    setDocs(prev=>sortById([...prev,{...d,file_count:0}]));
+    if(supabase&&connected){
+      const{work_groups,...docData}=d;
+      const{error}=await supabase.from('documents').insert(docData);
+      if(error){alert('저장 실패: '+error.message);return;}
+      if(work_groups&&work_groups.length>0){
         for(const w of work_groups)await supabase.from('document_work_groups').insert({document_id:d.id,work_group:w});
       }
     }
@@ -1169,7 +1222,7 @@ export default function App(){
         </div>
         <div className="content">
           {page==='dashboard'&&<Dashboard docs={docs}issues={issues}risks={risks}actions={actions}milestones={milestones}/>}
-          {page==='documents'&&<DocList docs={docs}onSelect={setSelectedDoc}/>}
+          {page==='documents'&&<DocList docs={docs}onSelect={setSelectedDoc}onAdd={()=>setSelectedDoc({__isNew:true})}/>}
           {page==='issues'&&<IssueList issues={issues}onUpdate={updateIssue}onAdd={addIssue}onDelete={deleteIssue}/>}
           {page==='risks'&&<RiskList risks={risks}onUpdate={updateRisk}onAdd={addRisk}onDelete={deleteRisk}/>}
           {page==='actions'&&<ActionList actions={actions}onUpdate={updateAction}onAdd={addAction}onDelete={deleteAction}/>}
@@ -1179,6 +1232,6 @@ export default function App(){
         </div>
       </div>
     </div>
-    {selectedDoc&&<DocDetail doc={selectedDoc}onClose={()=>setSelectedDoc(null)}onUpdate={updateDoc}connected={connected}/>}
+    {selectedDoc&&<DocDetail doc={selectedDoc}onClose={()=>setSelectedDoc(null)}onUpdate={updateDoc}onAdd={addDoc}connected={connected}/>}
   </>;
 }
